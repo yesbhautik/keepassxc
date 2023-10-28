@@ -541,25 +541,41 @@ bool DatabaseTabWidget::warnOnExport()
     return ans == MessageBox::Yes;
 }
 
-void DatabaseTabWidget::showDatabaseSecurity()
+void DatabaseTabWidget::showDatabaseSecurity(bool state)
 {
-    currentDatabaseWidget()->switchToDatabaseSecurity();
+    if (state) {
+        currentDatabaseWidget()->switchToDatabaseSecurity();
+    } else {
+        currentDatabaseWidget()->switchToMainView();
+    }
 }
 
-void DatabaseTabWidget::showDatabaseReports()
+void DatabaseTabWidget::showDatabaseReports(bool state)
 {
-    currentDatabaseWidget()->switchToDatabaseReports();
+    if (state) {
+        currentDatabaseWidget()->switchToDatabaseReports();
+    } else {
+        currentDatabaseWidget()->switchToMainView();
+    }
 }
 
-void DatabaseTabWidget::showDatabaseSettings()
+void DatabaseTabWidget::showDatabaseSettings(bool state)
 {
-    currentDatabaseWidget()->switchToDatabaseSettings();
+    if (state) {
+        currentDatabaseWidget()->switchToDatabaseSettings();
+    } else {
+        currentDatabaseWidget()->switchToMainView();
+    }
 }
 
 #ifdef WITH_XC_BROWSER_PASSKEYS
-void DatabaseTabWidget::showPasskeys()
+void DatabaseTabWidget::showPasskeys(bool state)
 {
-    currentDatabaseWidget()->switchToPasskeys();
+    if (state) {
+        currentDatabaseWidget()->switchToPasskeys();
+    } else {
+        currentDatabaseWidget()->switchToMainView();
+    }
 }
 
 void DatabaseTabWidget::importPasskey()

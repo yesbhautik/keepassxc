@@ -65,6 +65,7 @@ public:
     void addPage(QSharedPointer<IReportsPage> page);
 #ifdef WITH_XC_BROWSER_PASSKEYS
     void activatePasskeysPage();
+    bool onPassKeysPage();
 #endif
 
 signals:

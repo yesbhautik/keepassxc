@@ -69,8 +69,12 @@ public:
         None,
         ImportMode,
         ViewMode,
-        EditMode,
-        LockedMode
+        EditEntryMode,
+        EditGroupMode,
+        LockedMode,
+        ReportsMode,
+        PassKeysMode,
+        DatabaseSettingsMode
     };
 
     explicit DatabaseWidget(QSharedPointer<Database> db, QWidget* parent = nullptr);

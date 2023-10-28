@@ -1,4 +1,4 @@
-/*
+s/*
  *  Copyright (C) 2023 KeePassXC Team <team@keepassxc.org>
  *  Copyright (C) 2010 Felix Geyer <debfx@fobos.de>
  *
@@ -39,6 +39,7 @@
 #include "core/InactivityTimer.h"
 #include "core/Resources.h"
 #include "core/Tools.h"
+#include "dbsettings/DatabaseSettingsDialog.h"
 #include "gui/AboutDialog.h"
 #include "gui/Icons.h"
 #include "gui/MessageBox.h"
@@ -381,8 +382,10 @@ MainWindow::MainWindow()
     m_ui->actionDatabaseSaveBackup->setIcon(icons()->icon("document-save-copy"));
     m_ui->actionDatabaseClose->setIcon(icons()->icon("document-close"));
     m_ui->actionReports->setIcon(icons()->icon("reports"));
-    m_ui->actionDatabaseSettings->setIcon(icons()->icon("document-edit"));
+    m_ui->actionDatabaseSettings->setIcon(icons()->icon("database-settings"));
     m_ui->actionDatabaseSecurity->setIcon(icons()->icon("database-change-key"));
+    m_ui->actionPasskeys->setIcon(icons()->icon("passkey"));
+    m_ui->actionImportPasskey->setIcon(icons()->icon("document-import"));
     m_ui->actionLockDatabase->setIcon(icons()->icon("database-lock"));
     m_ui->actionLockDatabaseToolbar->setIcon(icons()->icon("database-lock"));
     m_ui->actionLockAllDatabases->setIcon(icons()->icon("database-lock-all"));
@@ -390,6 +393,12 @@ MainWindow::MainWindow()
     m_ui->actionDatabaseMerge->setIcon(icons()->icon("database-merge"));
     m_ui->menuImport->setIcon(icons()->icon("document-import"));
     m_ui->menuExport->setIcon(icons()->icon("document-export"));
+
+#ifndef WITH_XC_BROWSER_PASSKEYS
+    m_ui->actionPasskeys->setVisible(false);
+    m_ui->actionImportPasskey->setVisible(false);
+    m_ui->actionEntryImportPasskey->setVisible(false);
+#endif
 
     m_ui->actionEntryNew->setIcon(icons()->icon("entry-new"));
     m_ui->actionEntryClone->setIcon(icons()->icon("entry-clone"));
@@ -415,6 +424,7 @@ MainWindow::MainWindow()
     m_ui->actionEntryCopyPasswordTotp->setIcon(icons()->icon("totp-copy-password"));
     m_ui->actionEntryTotpQRCode->setIcon(icons()->icon("qrcode"));
     m_ui->actionEntrySetupTotp->setIcon(icons()->icon("totp-edit"));
+    m_ui->actionEntryImportPasskey->setIcon(icons()->icon("document-import"));
     m_ui->actionEntryAddToAgent->setIcon(icons()->icon("utilities-terminal"));
     m_ui->actionEntryRemoveFromAgent->setIcon(icons()->icon("utilities-terminal"));
     m_ui->menuTags->setIcon(icons()->icon("tag-multiple"));
@@ -441,12 +451,6 @@ MainWindow::MainWindow()
     m_ui->actionOnlineHelp->setIcon(icons()->icon("system-help"));
     m_ui->actionKeyboardShortcuts->setIcon(icons()->icon("keyboard-shortcuts"));
     m_ui->actionCheckForUpdates->setIcon(icons()->icon("system-software-update"));
-
-#ifdef WITH_XC_BROWSER_PASSKEYS
-    m_ui->actionPasskeys->setIcon(icons()->icon("passkey"));
-    m_ui->actionImportPasskey->setIcon(icons()->icon("document-import"));
-    m_ui->actionEntryImportPasskey->setIcon(icons()->icon("document-import"));
-#endif
 
     m_actionMultiplexer.connect(
         SIGNAL(currentModeChanged(DatabaseWidget::Mode)), this, SLOT(setMenuActionState(DatabaseWidget::Mode)));
@@ -491,10 +495,29 @@ MainWindow::MainWindow()
     connect(m_ui->actionDatabaseClose, SIGNAL(triggered()), m_ui->tabWidget, SLOT(closeCurrentDatabaseTab()));
     connect(m_ui->actionDatabaseMerge, SIGNAL(triggered()), m_ui->tabWidget, SLOT(mergeDatabase()));
     connect(m_ui->actionDatabaseSecurity, SIGNAL(triggered()), m_ui->tabWidget, SLOT(showDatabaseSecurity()));
-    connect(m_ui->actionReports, SIGNAL(triggered()), m_ui->tabWidget, SLOT(showDatabaseReports()));
-    connect(m_ui->actionDatabaseSettings, SIGNAL(triggered()), m_ui->tabWidget, SLOT(showDatabaseSettings()));
+    connect(m_ui->actionDatabaseSettings, &QAction::toggled, this, [&](bool state) {
+        if (state) {
+            // NOTE: Move this into state change
+            m_ui->actionPasskeys->setChecked(false);
+            m_ui->actionReports->setChecked(false);
+        }
+        m_ui->tabWidget->showDatabaseSettings(state);
+    });
+    connect(m_ui->actionReports, &QAction::toggled, this, [&](bool state) {
+        if (state) {
+            m_ui->actionPasskeys->setChecked(false);
+            m_ui->actionDatabaseSettings->setChecked(false);
+        }
+        m_ui->tabWidget->showDatabaseReports(state);
+    });
 #ifdef WITH_XC_BROWSER_PASSKEYS
-    connect(m_ui->actionPasskeys, SIGNAL(triggered()), m_ui->tabWidget, SLOT(showPasskeys()));
+    connect(m_ui->actionPasskeys, &QAction::toggled, this, [&](bool state) {
+        if (state) {
+            m_ui->actionReports->setChecked(false);
+            m_ui->actionDatabaseSettings->setChecked(false);
+        }
+        m_ui->tabWidget->showPasskeys(state);
+    });
     connect(m_ui->actionImportPasskey, SIGNAL(triggered()), m_ui->tabWidget, SLOT(importPasskey()));
     connect(m_ui->actionEntryImportPasskey, SIGNAL(triggered()), m_ui->tabWidget, SLOT(importPasskeyToEntry()));
 #endif
@@ -886,242 +909,154 @@ void MainWindow::openDatabase(const QString& filePath, const QString& password, 
 
 void MainWindow::setMenuActionState(DatabaseWidget::Mode mode)
 {
+    /*
+     *  MainWindow Content:
+     *      Welcome Screen (No Databases Open)
+     *      Database Widget
+     *          Lock Screen / Import View
+     *          Entry View
+     *          Entry Edit
+     *          Reports
+     *          PassKey Report
+     *          Database Settings
+     *      Application Settings
+     *      Password Generator
+     *
+     *  Database States:
+     *      None
+     *      Locked
+     *      Unlocked
+     *
+     *  Entry States:
+     *      Cannot interact with an entry
+     *      Entry is being edited
+     *      One entry selected
+     *      More than one entry selected
+     *
+     *  Group States:
+     *      Cannot interact with a group
+     *      Group is being edited
+     *      One group is selected
+     */
+
+    // MainWindow State
     int currentIndex = m_ui->stackedWidget->currentIndex();
+    bool databaseOpen = (currentIndex == DatabaseTabScreen && m_ui->tabWidget->count() > 0);
+    bool hasLockableDatabase = m_ui->tabWidget->hasLockableDatabases();
 
-    bool inDatabaseTabWidget = (currentIndex == DatabaseTabScreen);
-    bool inWelcomeWidget = (currentIndex == WelcomeScreen);
-    bool inDatabaseTabWidgetOrWelcomeWidget = inDatabaseTabWidget || inWelcomeWidget;
+    auto dbWidget = (databaseOpen ? m_ui->tabWidget->currentDatabaseWidget() : nullptr);
+    auto dbMode = (dbWidget ? dbWidget->currentMode() : DatabaseWidget::Mode::None);
 
-    m_ui->actionDatabaseClose->setEnabled(true);
-    m_ui->actionDatabaseMerge->setEnabled(inDatabaseTabWidget);
-    m_ui->actionDatabaseNew->setEnabled(inDatabaseTabWidgetOrWelcomeWidget);
-    m_ui->actionDatabaseOpen->setEnabled(inDatabaseTabWidgetOrWelcomeWidget);
-    m_ui->menuRecentDatabases->setEnabled(inDatabaseTabWidgetOrWelcomeWidget);
-    m_ui->menuImport->setEnabled(inDatabaseTabWidgetOrWelcomeWidget);
-    m_ui->actionLockDatabase->setEnabled(m_ui->tabWidget->hasLockableDatabases());
-    m_ui->actionLockDatabaseToolbar->setEnabled(m_ui->tabWidget->hasLockableDatabases());
-    m_ui->actionLockAllDatabases->setEnabled(m_ui->tabWidget->hasLockableDatabases());
+    // Database State
+    bool databaseUnlocked = (dbWidget && !dbWidget->isLocked());
+    bool viewingDatabase = (dbMode == DatabaseWidget::Mode::ViewMode);
+    bool viewingReports = (dbMode == DatabaseWidget::Mode::ReportsMode);
+    bool editingEntry = (dbMode == DatabaseWidget::Mode::EditEntryMode);
+    bool editingGroup = (dbMode == DatabaseWidget::Mode::EditGroupMode);
 
-    if (inDatabaseTabWidget && m_ui->tabWidget->currentIndex() != -1) {
-        DatabaseWidget* dbWidget = m_ui->tabWidget->currentDatabaseWidget();
-        Q_ASSERT(dbWidget);
+    // Entry State
+    bool singleEntrySelected = (viewingDatabase && dbWidget->numberOfSelectedEntries() == 1);
+    bool multiEntrySelected = (viewingDatabase && dbWidget->numberOfSelectedEntries() > 0);
+    bool entryViewSorted = (viewingDatabase && dbWidget->isSorted());
+    bool entryViewAtTop = (viewingDatabase && dbWidget->currentEntryIndex() == 0);
+    bool entryViewAtBottom =
+        (viewingDatabase && dbWidget->currentEntryIndex() == dbWidget->currentGroup()->entries().size() - 1);
 
-        if (mode == DatabaseWidget::Mode::None) {
-            mode = dbWidget->currentMode();
-        }
+    // Group State
+    bool groupSelected = (viewingDatabase && dbWidget->isGroupSelected());
+    bool currentGroupHasChildren = (groupSelected && dbWidget->currentGroup()->hasChildren());
+    bool currentGroupHasEntries = (groupSelected && !dbWidget->currentGroup()->entries().isEmpty());
+    bool recycleBinSelected = (viewingDatabase && dbWidget->isRecycleBinSelected());
 
-        switch (mode) {
-        case DatabaseWidget::Mode::ViewMode: {
-            bool singleEntrySelected = dbWidget->numberOfSelectedEntries() == 1;
-            bool entriesSelected = dbWidget->numberOfSelectedEntries() > 0;
-            bool groupSelected = dbWidget->isGroupSelected();
-            bool currentGroupHasChildren = dbWidget->currentGroup()->hasChildren();
-            bool currentGroupHasEntries = !dbWidget->currentGroup()->entries().isEmpty();
-            bool recycleBinSelected = dbWidget->isRecycleBinSelected();
-            bool sorted = dbWidget->isSorted();
-            int entryIndex = dbWidget->currentEntryIndex();
-            int numEntries = dbWidget->currentGroup()->entries().size();
-
-            m_ui->actionEntryNew->setEnabled(true);
-            m_ui->actionEntryClone->setEnabled(singleEntrySelected);
-            m_ui->actionEntryEdit->setEnabled(singleEntrySelected);
-            m_ui->actionEntryDelete->setEnabled(entriesSelected);
-            m_ui->actionEntryRestore->setVisible(entriesSelected && recycleBinSelected);
-            m_ui->actionEntryRestore->setEnabled(entriesSelected && recycleBinSelected);
-            m_ui->actionEntryRestore->setText(tr("Restore Entry(s)", "", dbWidget->numberOfSelectedEntries()));
-            m_ui->actionEntryRestore->setToolTip(tr("Restore Entry(s)", "", dbWidget->numberOfSelectedEntries()));
-            m_ui->actionEntryMoveUp->setVisible(!sorted);
-            m_ui->actionEntryMoveDown->setVisible(!sorted);
-            m_ui->actionEntryMoveUp->setEnabled(singleEntrySelected && !sorted && entryIndex > 0);
-            m_ui->actionEntryMoveDown->setEnabled(singleEntrySelected && !sorted && entryIndex >= 0
-                                                  && entryIndex < numEntries - 1);
-            m_ui->actionEntryCopyTitle->setEnabled(singleEntrySelected && dbWidget->currentEntryHasTitle());
-            m_ui->actionEntryCopyUsername->setEnabled(singleEntrySelected && dbWidget->currentEntryHasUsername());
-            // NOTE: Copy password is enabled even if the selected entry's password is blank to prevent Ctrl+C
-            // from copying information from the currently selected cell in the entry view table.
-            m_ui->actionEntryCopyPassword->setEnabled(singleEntrySelected);
-            m_ui->actionEntryCopyURL->setEnabled(singleEntrySelected && dbWidget->currentEntryHasUrl());
-            m_ui->actionEntryCopyNotes->setEnabled(singleEntrySelected && dbWidget->currentEntryHasNotes());
-            m_ui->menuEntryCopyAttribute->setEnabled(singleEntrySelected);
-            m_ui->menuEntryTotp->setEnabled(singleEntrySelected);
-            m_ui->menuTags->setEnabled(entriesSelected);
-            m_ui->actionEntryAutoType->setEnabled(singleEntrySelected && dbWidget->currentEntryHasAutoTypeEnabled());
-            m_ui->actionEntryAutoType->menu()->setEnabled(singleEntrySelected
-                                                          && dbWidget->currentEntryHasAutoTypeEnabled());
-            m_ui->actionEntryAutoTypeSequence->setText(
-                singleEntrySelected ? dbWidget->currentSelectedEntry()->effectiveAutoTypeSequence()
-                                    : Group::RootAutoTypeSequence);
-            m_ui->actionEntryAutoTypeSequence->setEnabled(singleEntrySelected);
-            m_ui->actionEntryAutoTypeUsername->setEnabled(singleEntrySelected && dbWidget->currentEntryHasUsername());
-            m_ui->actionEntryAutoTypeUsernameEnter->setEnabled(singleEntrySelected
-                                                               && dbWidget->currentEntryHasUsername());
-            m_ui->actionEntryAutoTypePassword->setEnabled(singleEntrySelected && dbWidget->currentEntryHasPassword());
-            m_ui->actionEntryAutoTypePasswordEnter->setEnabled(singleEntrySelected
-                                                               && dbWidget->currentEntryHasPassword());
-            m_ui->actionEntryAutoTypeTOTP->setEnabled(singleEntrySelected && dbWidget->currentEntryHasTotp());
-            m_ui->actionEntryAutoTypeTOTP->setVisible(singleEntrySelected && dbWidget->currentEntryHasTotp());
-            m_ui->actionEntryOpenUrl->setEnabled(singleEntrySelected && dbWidget->currentEntryHasUrl());
-            m_ui->actionEntryTotp->setEnabled(singleEntrySelected && dbWidget->currentEntryHasTotp());
-            m_ui->actionEntryCopyTotp->setEnabled(singleEntrySelected && dbWidget->currentEntryHasTotp());
-            m_ui->actionEntryCopyPasswordTotp->setEnabled(singleEntrySelected && dbWidget->currentEntryHasTotp());
-            m_ui->actionEntrySetupTotp->setEnabled(singleEntrySelected);
-            m_ui->actionEntryTotpQRCode->setEnabled(singleEntrySelected && dbWidget->currentEntryHasTotp());
-            m_ui->actionEntryDownloadIcon->setEnabled((entriesSelected && !singleEntrySelected)
-                                                      || (singleEntrySelected && dbWidget->currentEntryHasUrl()));
-            m_ui->actionGroupNew->setEnabled(groupSelected);
-            m_ui->actionGroupEdit->setEnabled(groupSelected);
-            m_ui->actionGroupClone->setEnabled(groupSelected && dbWidget->canCloneCurrentGroup());
-            m_ui->actionGroupDelete->setEnabled(groupSelected && dbWidget->canDeleteCurrentGroup());
-            m_ui->actionGroupSortAsc->setEnabled(groupSelected && currentGroupHasChildren);
-            m_ui->actionGroupSortDesc->setEnabled(groupSelected && currentGroupHasChildren);
-            m_ui->actionGroupEmptyRecycleBin->setVisible(recycleBinSelected);
-            m_ui->actionGroupEmptyRecycleBin->setEnabled(recycleBinSelected);
-#ifdef WITH_XC_NETWORKING
-            m_ui->actionGroupDownloadFavicons->setVisible(!recycleBinSelected);
-#endif
-            m_ui->actionGroupDownloadFavicons->setEnabled(groupSelected && currentGroupHasEntries
-                                                          && !recycleBinSelected);
-            m_ui->actionDatabaseSecurity->setEnabled(true);
-            m_ui->actionReports->setEnabled(true);
-            m_ui->actionDatabaseSettings->setEnabled(true);
-            m_ui->actionDatabaseSave->setEnabled(m_ui->tabWidget->canSave());
-            m_ui->actionDatabaseSaveAs->setEnabled(true);
-            m_ui->actionDatabaseSaveBackup->setEnabled(true);
-            m_ui->menuExport->setEnabled(true);
-            m_ui->actionExportCsv->setEnabled(true);
-            m_ui->actionExportHtml->setEnabled(true);
-            m_ui->actionExportXML->setEnabled(true);
-            m_ui->actionDatabaseMerge->setEnabled(m_ui->tabWidget->currentIndex() != -1);
+    m_ui->actionEntryNew->setEnabled(viewingDatabase);
+    m_ui->actionEntryClone->setEnabled(singleEntrySelected);
+    m_ui->actionEntryEdit->setEnabled(singleEntrySelected);
+    m_ui->actionEntryDelete->setEnabled(multiEntrySelected);
+    m_ui->actionEntryRestore->setVisible(multiEntrySelected && recycleBinSelected);
+    m_ui->actionEntryRestore->setEnabled(multiEntrySelected && recycleBinSelected);
+    if (dbWidget) {
+        m_ui->actionEntryRestore->setText(tr("Restore Entry(s)", "", dbWidget->numberOfSelectedEntries()));
+        m_ui->actionEntryRestore->setToolTip(tr("Restore Entry(s)", "", dbWidget->numberOfSelectedEntries()));
+    }
+    m_ui->actionEntryMoveUp->setVisible(viewingDatabase && !entryViewSorted);
+    m_ui->actionEntryMoveDown->setVisible(viewingDatabase && !entryViewSorted);
+    m_ui->actionEntryMoveUp->setEnabled(singleEntrySelected && !entryViewSorted && !entryViewAtTop);
+    m_ui->actionEntryMoveDown->setEnabled(singleEntrySelected && !entryViewSorted && !entryViewAtBottom);
+    m_ui->actionEntryCopyTitle->setEnabled(singleEntrySelected && dbWidget->currentEntryHasTitle());
+    m_ui->actionEntryCopyUsername->setEnabled(singleEntrySelected && dbWidget->currentEntryHasUsername());
+    // NOTE: Copy password is enabled even if the selected entry's password is blank to prevent Ctrl+C
+    // from copying information from the currently selected cell in the entry view table.
+    m_ui->actionEntryCopyPassword->setEnabled(singleEntrySelected);
+    m_ui->actionEntryCopyURL->setEnabled(singleEntrySelected && dbWidget->currentEntryHasUrl());
+    m_ui->actionEntryCopyNotes->setEnabled(singleEntrySelected && dbWidget->currentEntryHasNotes());
+    m_ui->menuEntryCopyAttribute->setEnabled(singleEntrySelected);
+    m_ui->menuEntryTotp->setEnabled(singleEntrySelected);
+    m_ui->menuTags->setEnabled(multiEntrySelected);
+    m_ui->actionEntryAutoType->setEnabled(singleEntrySelected && dbWidget->currentEntryHasAutoTypeEnabled());
+    m_ui->actionEntryAutoType->menu()->setEnabled(singleEntrySelected && dbWidget->currentEntryHasAutoTypeEnabled());
+    m_ui->actionEntryAutoTypeSequence->setText(singleEntrySelected
+                                                   ? dbWidget->currentSelectedEntry()->effectiveAutoTypeSequence()
+                                                   : Group::RootAutoTypeSequence);
+    m_ui->actionEntryAutoTypeSequence->setEnabled(singleEntrySelected);
+    m_ui->actionEntryAutoTypeUsername->setEnabled(singleEntrySelected && dbWidget->currentEntryHasUsername());
+    m_ui->actionEntryAutoTypeUsernameEnter->setEnabled(singleEntrySelected && dbWidget->currentEntryHasUsername());
+    m_ui->actionEntryAutoTypePassword->setEnabled(singleEntrySelected && dbWidget->currentEntryHasPassword());
+    m_ui->actionEntryAutoTypePasswordEnter->setEnabled(singleEntrySelected && dbWidget->currentEntryHasPassword());
+    m_ui->actionEntryAutoTypeTOTP->setEnabled(singleEntrySelected && dbWidget->currentEntryHasTotp());
+    m_ui->actionEntryAutoTypeTOTP->setVisible(singleEntrySelected && dbWidget->currentEntryHasTotp());
+    m_ui->actionEntryOpenUrl->setEnabled(singleEntrySelected && dbWidget->currentEntryHasUrl());
+    m_ui->actionEntryTotp->setEnabled(singleEntrySelected && dbWidget->currentEntryHasTotp());
+    m_ui->actionEntryCopyTotp->setEnabled(singleEntrySelected && dbWidget->currentEntryHasTotp());
+    m_ui->actionEntryCopyPasswordTotp->setEnabled(singleEntrySelected && dbWidget->currentEntryHasTotp());
+    m_ui->actionEntrySetupTotp->setEnabled(singleEntrySelected);
+    m_ui->actionEntryTotpQRCode->setEnabled(singleEntrySelected && dbWidget->currentEntryHasTotp());
+    m_ui->actionEntryDownloadIcon->setEnabled((multiEntrySelected && !singleEntrySelected)
+                                              || (singleEntrySelected && dbWidget->currentEntryHasUrl()));
 #ifdef WITH_XC_BROWSER_PASSKEYS
-            m_ui->actionPasskeys->setEnabled(true);
-            m_ui->actionImportPasskey->setEnabled(true);
-            m_ui->actionEntryImportPasskey->setEnabled(true);
+    m_ui->actionEntryImportPasskey->setEnabled(singleEntrySelected);
+#endif
+    m_ui->actionGroupNew->setEnabled(groupSelected);
+    m_ui->actionGroupEdit->setEnabled(groupSelected);
+    m_ui->actionGroupClone->setEnabled(groupSelected && dbWidget->canCloneCurrentGroup());
+    m_ui->actionGroupDelete->setEnabled(groupSelected && dbWidget->canDeleteCurrentGroup());
+    m_ui->actionGroupSortAsc->setEnabled(groupSelected && currentGroupHasChildren);
+    m_ui->actionGroupSortDesc->setEnabled(groupSelected && currentGroupHasChildren);
+    m_ui->actionGroupEmptyRecycleBin->setVisible(recycleBinSelected);
+    m_ui->actionGroupEmptyRecycleBin->setEnabled(recycleBinSelected);
+#ifdef WITH_XC_NETWORKING
+    m_ui->actionGroupDownloadFavicons->setVisible(!recycleBinSelected);
+#endif
+    m_ui->actionGroupDownloadFavicons->setEnabled(groupSelected && currentGroupHasEntries && !recycleBinSelected);
+
+    // Database Menu
+    m_ui->actionDatabaseSecurity->setEnabled(databaseUnlocked);
+    m_ui->actionReports->setEnabled(databaseUnlocked);
+    m_ui->actionDatabaseSettings->setEnabled(databaseUnlocked);
+    m_ui->actionDatabaseSave->setEnabled(m_ui->tabWidget->canSave());
+    m_ui->actionDatabaseSaveAs->setEnabled(databaseUnlocked);
+    m_ui->actionDatabaseSaveBackup->setEnabled(databaseUnlocked);
+    m_ui->actionDatabaseClose->setEnabled(databaseOpen);
+    m_ui->actionLockDatabase->setEnabled(databaseUnlocked);
+    m_ui->actionLockAllDatabases->setEnabled(hasLockableDatabase);
+    m_ui->actionLockDatabaseToolbar->setEnabled(hasLockableDatabase);
+    m_ui->menuExport->setEnabled(databaseUnlocked);
+    m_ui->actionExportCsv->setEnabled(databaseUnlocked);
+    m_ui->actionExportHtml->setEnabled(databaseUnlocked);
+    m_ui->actionExportXML->setEnabled(databaseUnlocked);
+    m_ui->actionDatabaseMerge->setEnabled(databaseUnlocked);
+#ifdef WITH_XC_BROWSER_PASSKEYS
+    m_ui->actionPasskeys->setEnabled(databaseUnlocked);
+    m_ui->actionImportPasskey->setEnabled(databaseUnlocked);
 #endif
 #ifdef WITH_XC_SSHAGENT
-            bool singleEntryHasSshKey =
-                singleEntrySelected && sshAgent()->isEnabled() && dbWidget->currentEntryHasSshKey();
-            m_ui->actionEntryAddToAgent->setVisible(singleEntryHasSshKey);
-            m_ui->actionEntryAddToAgent->setEnabled(singleEntryHasSshKey);
-            m_ui->actionEntryRemoveFromAgent->setVisible(singleEntryHasSshKey);
-            m_ui->actionEntryRemoveFromAgent->setEnabled(singleEntryHasSshKey);
+    bool singleEntryHasSshKey = singleEntrySelected && sshAgent()->isEnabled() && dbWidget->currentEntryHasSshKey();
+    m_ui->actionEntryAddToAgent->setVisible(singleEntryHasSshKey);
+    m_ui->actionEntryAddToAgent->setEnabled(singleEntryHasSshKey);
+    m_ui->actionEntryRemoveFromAgent->setVisible(singleEntryHasSshKey);
+    m_ui->actionEntryRemoveFromAgent->setEnabled(singleEntryHasSshKey);
 #endif
 
-            m_searchWidgetAction->setEnabled(true);
-
-            break;
-        }
-        case DatabaseWidget::Mode::EditMode:
-        case DatabaseWidget::Mode::ImportMode:
-        case DatabaseWidget::Mode::LockedMode: {
-            // Enable select actions when editing an entry
-            bool editEntryActive = dbWidget->isEntryEditActive();
-            const auto editEntryActionsMask = QList<QAction*>({m_ui->actionEntryCopyUsername,
-                                                               m_ui->actionEntryCopyPassword,
-                                                               m_ui->actionEntryCopyURL,
-                                                               m_ui->actionEntryOpenUrl,
-                                                               m_ui->actionEntryAutoType,
-                                                               m_ui->actionEntryDownloadIcon,
-                                                               m_ui->actionEntryCopyNotes,
-                                                               m_ui->actionEntryCopyTitle,
-                                                               m_ui->menuEntryCopyAttribute->menuAction(),
-                                                               m_ui->menuEntryTotp->menuAction(),
-                                                               m_ui->actionEntrySetupTotp});
-
-            auto entryActions = m_ui->menuEntries->actions();
-            entryActions << m_ui->menuEntryCopyAttribute->actions();
-            entryActions << m_ui->menuEntryTotp->actions();
-            for (auto action : entryActions) {
-                bool enabled = editEntryActive && editEntryActionsMask.contains(action);
-                if (action->menu()) {
-                    action->menu()->setEnabled(enabled);
-                }
-                action->setEnabled(enabled);
-            }
-
-            const auto groupActions = m_ui->menuGroups->actions();
-            for (auto action : groupActions) {
-                action->setEnabled(false);
-            }
-
-            m_ui->actionDatabaseSecurity->setEnabled(false);
-            m_ui->actionReports->setEnabled(false);
-            m_ui->actionDatabaseSettings->setEnabled(false);
-            m_ui->actionDatabaseSave->setEnabled(false);
-            m_ui->actionDatabaseSaveAs->setEnabled(false);
-            m_ui->actionDatabaseSaveBackup->setEnabled(false);
-            m_ui->menuExport->setEnabled(false);
-            m_ui->actionExportCsv->setEnabled(false);
-            m_ui->actionExportHtml->setEnabled(false);
-            m_ui->actionDatabaseMerge->setEnabled(false);
-            // Only disable the action in the database menu so that the
-            // menu remains active in the toolbar, if necessary
-            m_ui->actionLockDatabase->setEnabled(false);
-            // Never show in these modes
-            m_ui->actionEntryMoveUp->setVisible(false);
-            m_ui->actionEntryMoveDown->setVisible(false);
-            m_ui->actionEntryRestore->setVisible(false);
-            m_ui->actionEntryAddToAgent->setVisible(false);
-            m_ui->actionEntryRemoveFromAgent->setVisible(false);
-            m_ui->actionGroupEmptyRecycleBin->setVisible(false);
-
-#ifdef WITH_XC_BROWSER_PASSKEYS
-            m_ui->actionPasskeys->setEnabled(false);
-            m_ui->actionImportPasskey->setEnabled(false);
-            m_ui->actionEntryImportPasskey->setEnabled(false);
-#else
-            m_ui->actionPasskeys->setVisible(false);
-            m_ui->actionImportPasskey->setVisible(false);
-            m_ui->actionEntryImportPasskey->setVisible(false);
-#endif
-
-            m_searchWidgetAction->setEnabled(false);
-            break;
-        }
-        default:
-            Q_ASSERT(false);
-        }
-    } else {
-        const auto entryActions = m_ui->menuEntries->actions();
-        for (auto action : entryActions) {
-            action->setEnabled(false);
-        }
-
-        const auto groupActions = m_ui->menuGroups->actions();
-        for (auto action : groupActions) {
-            action->setEnabled(false);
-        }
-
-        m_ui->actionDatabaseSecurity->setEnabled(false);
-        m_ui->actionReports->setEnabled(false);
-        m_ui->actionDatabaseSettings->setEnabled(false);
-        m_ui->actionDatabaseSave->setEnabled(false);
-        m_ui->actionDatabaseSaveAs->setEnabled(false);
-        m_ui->actionDatabaseSaveBackup->setEnabled(false);
-        m_ui->actionDatabaseClose->setEnabled(false);
-        m_ui->menuExport->setEnabled(false);
-        m_ui->actionExportCsv->setEnabled(false);
-        m_ui->actionExportHtml->setEnabled(false);
-        m_ui->actionDatabaseMerge->setEnabled(false);
-        // Hide entry-specific actions
-        m_ui->actionEntryMoveUp->setVisible(false);
-        m_ui->actionEntryMoveDown->setVisible(false);
-        m_ui->actionEntryRestore->setVisible(false);
-        m_ui->actionEntryAddToAgent->setVisible(false);
-        m_ui->actionEntryRemoveFromAgent->setVisible(false);
-        m_ui->actionGroupEmptyRecycleBin->setVisible(false);
-
-        m_searchWidgetAction->setEnabled(false);
-    }
-
-    if ((currentIndex == PasswordGeneratorScreen) != m_ui->actionPasswordGenerator->isChecked()) {
-        bool blocked = m_ui->actionPasswordGenerator->blockSignals(true);
-        m_ui->actionPasswordGenerator->toggle();
-        m_ui->actionPasswordGenerator->blockSignals(blocked);
-    } else if ((currentIndex == SettingsScreen) != m_ui->actionSettings->isChecked()) {
-        bool blocked = m_ui->actionSettings->blockSignals(true);
-        m_ui->actionSettings->toggle();
-        m_ui->actionSettings->blockSignals(blocked);
-    }
+    m_searchWidgetAction->setEnabled(viewingDatabase);
 }
 
 void MainWindow::updateToolbarSeparatorVisibility()

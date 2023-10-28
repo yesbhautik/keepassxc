@@ -269,17 +269,28 @@ QSharedPointer<Database> DatabaseWidget::database() const
 
 DatabaseWidget::Mode DatabaseWidget::currentMode() const
 {
-    if (currentWidget() == nullptr) {
-        return Mode::None;
-    } else if (currentWidget() == m_mainWidget) {
-        return Mode::ViewMode;
-    } else if (currentWidget() == m_databaseOpenWidget || currentWidget() == m_keepass1OpenWidget) {
-        return Mode::LockedMode;
-    } else if (currentWidget() == m_csvImportWizard) {
-        return Mode::ImportMode;
+    auto mode = Mode::None;
+    auto widget = currentWidget();
+    if (widget == m_mainWidget) {
+        mode = Mode::ViewMode;
+    } else if (widget == m_databaseOpenWidget || widget == m_keepass1OpenWidget) {
+        mode = Mode::LockedMode;
+    } else if (widget == m_csvImportWizard) {
+        mode = Mode::ImportMode;
+    } else if (widget == m_reportsDialog) {
+        mode = m_reportsDialog->onPassKeysPage() ? Mode::PassKeysMode : Mode::ReportsMode;
+    } else if (widget == m_databaseSettingDialog) {
+        mode = Mode::DatabaseSettingsMode;
+    } else if (widget == m_editEntryWidget) {
+        mode = Mode::EditEntryMode;
+    } else if (widget == m_editGroupWidget) {
+        mode = Mode::EditGroupMode;
     } else {
-        return Mode::EditMode;
+        // We are missing a condition if we reach here
+        Q_ASSERT(false);
     }
+
+    return mode;
 }
 
 bool DatabaseWidget::isLocked() const

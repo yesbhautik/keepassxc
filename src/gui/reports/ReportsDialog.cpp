@@ -135,6 +135,11 @@ void ReportsDialog::activatePasskeysPage()
     auto index = m_ui->stackedWidget->currentIndex();
     m_ui->categoryList->setCurrentCategory(index);
 }
+
+bool ReportsDialog::onPassKeysPage()
+{
+    return m_ui->stackedWidget->currentWidget() == m_passkeysPage->m_passkeysWidget;
+}
 #endif
 
 void ReportsDialog::reject()
