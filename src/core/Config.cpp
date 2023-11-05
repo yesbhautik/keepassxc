@@ -144,6 +144,7 @@ static const QHash<Config::ConfigKey, ConfigDirective> configStrings = {
     {Config::Security_NoConfirmMoveEntryToRecycleBin,{QS("Security/NoConfirmMoveEntryToRecycleBin"), Roaming, true}},
     {Config::Security_EnableCopyOnDoubleClick,{QS("Security/EnableCopyOnDoubleClick"), Roaming, false}},
     {Config::Security_QuickUnlock, {QS("Security/QuickUnlock"), Local, true}},
+    {Config::Security_QuickUnlockRemember, {QS("Security/QuickUnlockRemember"), Local, true}},
 
     // Browser
     {Config::Browser_Enabled, {QS("Browser/Enabled"), Roaming, false}},
