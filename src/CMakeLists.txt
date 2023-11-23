@@ -195,6 +195,7 @@ set(keepassx_SOURCES
         streams/StoreDataStream.cpp
         streams/SymmetricCipherStream.cpp
         quickunlock/QuickUnlockInterface.cpp
+        quickunlock/PinUnlock.cpp
         totp/totp.cpp)
 if(APPLE)
     set(keepassx_SOURCES
