@@ -32,6 +32,7 @@
 #include <QCloseEvent>
 #include <QDesktopServices>
 #include <QFont>
+
 namespace
 {
     constexpr int clearFormsDelay = 30000;
@@ -39,7 +40,8 @@ namespace
     bool isQuickUnlockAvailable()
     {
         if (config()->get(Config::Security_QuickUnlock).toBool()) {
-            return getQuickUnlock()->isAvailable();
+            auto qu = QuickUnlockManager::get()->getQuickUnlock();
+            return qu && qu->isAvailable();
         }
         return false;
     }
@@ -47,9 +49,9 @@ namespace
     bool canPerformQuickUnlock(const QUuid& dbUuid)
     {
         if (isQuickUnlockAvailable()) {
-            return getQuickUnlock()->hasKey(dbUuid);
+            auto qu = QuickUnlockManager::get()->getQuickUnlock();
+            return qu->hasKey(dbUuid);
         }
-        Q_UNUSED(dbUuid);
         return false;
     }
 } // namespace
@@ -279,9 +281,9 @@ void DatabaseOpenWidget::openDatabase()
         // Save Quick Unlock credentials if available
         if (!blockQuickUnlock && isQuickUnlockAvailable()) {
             auto keyData = databaseKey->serialize();
-            if (!getQuickUnlock()->setKey(m_db->publicUuid(), keyData) && !getQuickUnlock()->errorString().isEmpty()) {
-                getMainWindow()->displayTabMessage(getQuickUnlock()->errorString(),
-                                                   MessageWidget::MessageType::Warning);
+            auto qu = QuickUnlockManager::get()->getQuickUnlock();
+            if (!qu->setKey(m_db->publicUuid(), keyData) && !qu->errorString().isEmpty()) {
+                getMainWindow()->displayTabMessage(qu->errorString(), MessageWidget::MessageType::Warning);
             }
             m_ui->messageWidget->hideMessage();
         }
@@ -330,11 +332,12 @@ QSharedPointer<CompositeKey> DatabaseOpenWidget::buildDatabaseKey()
     if (!m_db.isNull() && canPerformQuickUnlock(m_db->publicUuid())) {
         // try to retrieve the stored password using quick unlock
         QByteArray keyData;
-        if (!getQuickUnlock()->getKey(m_db->publicUuid(), keyData)) {
+        auto qu = QuickUnlockManager::get()->getQuickUnlock();
+        if (!qu->getKey(m_db->publicUuid(), keyData)) {
             m_ui->messageWidget->showMessage(
-                tr("Failed to authenticate with Quick Unlock: %1").arg(getQuickUnlock()->errorString()),
+                tr("Failed to authenticate with Quick Unlock: %1").arg(qu->errorString()),
                 MessageWidget::Error);
-            if (!getQuickUnlock()->hasKey(m_db->publicUuid())) {
+            if (!qu->hasKey(m_db->publicUuid())) {
                 resetQuickUnlock();
             }
             return {};
@@ -537,7 +540,7 @@ void DatabaseOpenWidget::resetQuickUnlock()
         return;
     }
     if (!m_db.isNull()) {
-        getQuickUnlock()->reset(m_db->publicUuid());
+        QuickUnlockManager::get()->getQuickUnlock()->reset(m_db->publicUuid());
     }
     load(m_filename);
 }
