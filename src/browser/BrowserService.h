@@ -177,7 +177,6 @@ private:
     Access checkAccess(const Entry* entry, const QString& siteHost, const QString& formHost, const QString& realm);
     Group* getDefaultEntryGroup(const QSharedPointer<Database>& selectedDb = {});
     int sortPriority(const QStringList& urls, const QString& siteUrl, const QString& formUrl);
-    bool schemeFound(const QString& url);
     bool removeFirstDomain(QString& hostname);
     bool
     shouldIncludeEntry(Entry* entry, const QString& url, const QString& submitUrl, const bool omitWwwSubdomain = false);
@@ -198,7 +197,6 @@ private:
                    const bool omitWwwSubdomain = false);
     QString getDatabaseRootUuid();
     QString getDatabaseRecycleBinUuid();
-    bool checkLegacySettings(QSharedPointer<Database> db);
     void hideWindow() const;
     void raiseWindow(const bool force = false);
     void updateWindowState();
